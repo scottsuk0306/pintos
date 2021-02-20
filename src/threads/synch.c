@@ -176,9 +176,8 @@ void
 lock_init (struct lock *lock)
 {
   ASSERT (lock != NULL);
-
+  lock->max_priority = 0;
   lock->holder = NULL;
-  lock->original_priority = 0;
   sema_init (&lock->semaphore, 1);
 }
 
@@ -199,15 +198,17 @@ lock_acquire (struct lock *lock)
   int8_t current_priority = thread_get_priority();
   if(lock->holder != NULL && lock->holder->priority < current_priority)
   {
-    if(lock->original_priority == 0)
-      lock->original_priority = lock->holder->priority;
+    if(lock->holder->original_priority == 0)
+      lock->holder->original_priority = lock->holder->priority;
     lock->holder->priority = current_priority;
+    lock->max_priority = current_priority;
     list_sort(get_ready_list(), &thread_compare_priority, NULL);
     thread_yield();
   }
 
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  list_push_back(&thread_current()->lock_list, &lock->elem);
+  lock->holder = thread_current();
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -241,17 +242,33 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
   struct thread* current_thread = lock->holder;
-  int8_t donate_priority = lock->original_priority;
+  int8_t donate_priority = lock->holder->original_priority;
   lock->holder = NULL;
-  lock->original_priority = 0;
+  lock->max_priority = 0;
+  list_remove(&lock->elem);
   sema_up(&lock->semaphore);
   if(donate_priority != 0)
   {
-    if(current_thread->priority > donate_priority)
+    struct list *lock_list = &current_thread->lock_list;
+    if(list_empty(lock_list))
     {
       current_thread->priority = donate_priority;
-      thread_yield();
+      current_thread->original_priority = 0;
     }
+    else
+    {
+      struct list_elem *e;
+      int max_pri = 0;
+      for(e = list_begin(lock_list); e != list_end(lock_list); e = list_next(e))
+      {
+        struct lock *l = list_entry(e, struct lock, elem);
+        if(l->max_priority > max_pri)
+          max_pri = l->max_priority;
+      }
+      if (current_thread->original_priority < max_pri)
+        current_thread->priority = max_pri;
+    }
+    thread_yield();
   }
 }
 

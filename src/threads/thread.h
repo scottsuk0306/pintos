@@ -94,7 +94,8 @@ struct thread
     struct list_elem elem;              /* List element. */
 
     int64_t sleep_ticks;
-
+    int original_priority;
+    struct list lock_list;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
